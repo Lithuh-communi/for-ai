@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>📱 手机文件 - Rikkahub</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:#f5f5f7; color:#1d1d1f; padding:16px;
+}
+.container { max-width:800px; margin:0 auto; }
+.header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 0; border-bottom:1px solid #e0e0e0; margin-bottom:12px;
+    flex-wrap:wrap; gap:8px;
+}
+.header h1 { font-size:18px; font-weight:600; }
+.header .info { font-size:12px; color:#86868b; }
+.breadcrumb {
+    font-size:13px; padding:6px 0 10px; color:#86868b;
+    overflow-x:auto; white-space:nowrap;
+}
+.item {
+    display:flex; align-items:center; padding:10px 14px;
+    background:white; border-radius:10px; margin-bottom:5px;
+    text-decoration:none; color:#1d1d1f; transition:all 0.15s;
+}
+.item:hover { background:#f0f0f2; }
+.item:active { transform:scale(0.98); }
+.icon { font-size:18px; margin-right:10px; flex-shrink:0; width:24px; text-align:center; }
+.name { flex:1; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.meta { font-size:11px; color:#86868b; text-align:right; flex-shrink:0; margin-left:10px; }
+.meta .size { margin-right:6px; }
+.del {
+    background:none; border:none; color:#ff3b30; font-size:14px;
+    cursor:pointer; padding:2px 6px; border-radius:4px;
+    opacity:0; transition:opacity 0.15s; margin-left:8px;
+}
+.item:hover .del { opacity:0.6; }
+.item .del:hover { opacity:1; }
+.toolbar {
+    display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;
+}
+.toolbar button {
+    padding:8px 16px; border-radius:20px; border:none;
+    font-size:13px; cursor:pointer; transition:all 0.15s;
+}
+.btn-primary { background:#0071e3; color:white; }
+.btn-primary:hover { background:#0077ed; }
+.btn-secondary { background:#e0e0e0; color:#333; }
+.btn-secondary:hover { background:#d0d0d0; }
+.upload-area {
+    border:2px dashed #c7c7cc; border-radius:10px; padding:16px;
+    text-align:center; margin-top:12px; color:#86868b; cursor:pointer;
+    transition:all 0.15s; font-size:13px;
+}
+.upload-area:hover { border-color:#0071e3; background:#e8f0fe; color:#0071e3; }
+.upload-area input[type="file"] { display:none; }
+#status { margin-top:8px; font-size:12px; color:#666; text-align:center; }
+.empty { text-align:center; padding:30px 0; color:#86868b; font-size:13px; }
+.modal {
+    display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+    background:rgba(0,0,0,0.4); justify-content:center; align-items:center; z-index:100;
+}
+.modal-content {
+    background:white; border-radius:14px; padding:20px; width:300px;
+    box-shadow:0 8px 30px rgba(0,0,0,0.15);
+}
+.modal h3 { font-size:16px; margin-bottom:12px; }
+.modal input { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
+.modal .btns { display:flex; gap:8px; margin-top:12px; justify-content:flex-end; }
+@media (prefers-color-scheme:dark) {
+    body { background:#1c1c1e; color:#f5f5f7; }
+    .item { background:#2c2c2e; }
+    .item:hover { background:#3a3a3c; }
+    .header { border-color:#3a3a3c; }
+    .upload-area { border-color:#3a3a3c; }
+    .upload-area:hover { border-color:#0a84ff; background:#1a2638; }
+    .modal-content { background:#2c2c2e; }
+    .btn-secondary { background:#3a3a3c; color:#f5f5f7; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+    <h1>📱 手机文件</h1>
+    <div class="info">🔗 Rikkahub → 手机</div>
+</div>
+<div class="breadcrumb">__BREADCRUMB__</div>
+
+<div class="toolbar">
+    <button class="btn-primary" onclick="showMkdir()">📁 新建文件夹</button>
+    <button class="btn-secondary" onclick="location.href='/'">🏠 回到根目录</button>
+</div>
+
+<div id="fileList" style="margin-top:8px;">
+    __FILE_LIST__
+</div>
+
+<div class="upload-area" id="uploadArea">
+    <div>📤 点击选择文件上传到当前目录</div>
+    <input type="file" id="fileInput" multiple>
+</div>
+
+<div id="status"></div>
+</div>
+
+<!-- 新建文件夹弹窗 -->
+<div class="modal" id="mkdirModal">
+    <div class="modal-content">
+        <h3>📁 新建文件夹</h3>
+        <input type="text" id="folderName" placeholder="输入文件夹名称">
+        <div class="btns">
+            <button class="btn-secondary" onclick="closeMkdir()">取消</button>
+            <button class="btn-primary" onclick="doMkdir()">创建</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const currentDir = '__CURRENT_DIR__';
+
+// 上传
+document.getElementById('uploadArea').addEventListener('click', function() { document.getElementById('fileInput').click(); });
+document.getElementById('uploadArea').addEventListener('dragover', function(e) { e.preventDefault(); document.getElementById('uploadArea').classList.add('dragover'); });
+document.getElementById('uploadArea').addEventListener('dragleave', function() { document.getElementById('uploadArea').classList.remove('dragover'); });
+document.getElementById('uploadArea').addEventListener('drop', function(e) { e.preventDefault(); document.getElementById('uploadArea').classList.remove('dragover'); uploadFiles(e.dataTransfer.files); });
+document.getElementById('fileInput').addEventListener('change', function() { uploadFiles(this.files); this.value = ''; });
+
+function uploadFiles(files) {
+    if (!files.length) return;
+    var fd = new FormData();
+    fd.append('dir', currentDir);
+    for (var i = 0; i < files.length; i++) fd.append('file', files[i]);
+    document.getElementById('status').textContent = '⏳ 上传中...';
+    fetch('/api/upload', { method:'POST', body:fd })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if(d.success) {
+                document.getElementById('status').textContent = '✅ 上传成功！' + d.files.join(', ');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                document.getElementById('status').textContent = '❌ ' + (d.error||'失败');
+            }
+        })
+        .catch(function(e) { document.getElementById('status').textContent='❌ '+e.message; });
+}
+
+function downloadFile(encPath) {
+    window.location.href = '/api/download?file=' + encPath;
+}
+
+function deleteFile(encPath, isDir) {
+    var name = decodeURIComponent(encPath).split('/').pop();
+    if (!confirm('确定删除 "' + name + '" 吗？')) return;
+    fetch('/api/delete', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({file: decodeURIComponent(encPath), is_dir: isDir})
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if(d.success) location.reload();
+        else alert('❌ ' + d.error);
+    });
+}
+
+function showMkdir() { document.getElementById('mkdirModal').style.display='flex'; }
+function closeMkdir() { document.getElementById('mkdirModal').style.display='none'; document.getElementById('folderName').value=''; }
+function doMkdir() {
+    var name = document.getElementById('folderName').value.trim();
+    if (!name) return;
+    var path = currentDir.replace(/\/$/,'') + '/' + name;
+    fetch('/api/mkdir', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({dir: path})
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if(d.success) { closeMkdir(); location.reload(); }
+        else alert('❌ ' + d.error);
+    });
+}
+</script>
+</body>
+</html>
