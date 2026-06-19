@@ -1,5 +1,5 @@
 ---
-name: phone-adb-access
+name: phone-ftp-access
 description: Connect to the user's Android phone via ADB (Android Debug Bridge) over WiFi to access files, run shell commands, manage apps, and control the device. Also supports FTP as fallback. Trigger when the user says "连手机", "手机文件", "操作手机", "手机", "phone files", "adb", "安卓手机", "手机shell".
 ---
 
