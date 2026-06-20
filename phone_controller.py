@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""
-📱 手机终极控制台 — 三级策略，延迟最小 + 准确率最高
+"""phone_controller.py v2.0 — 手机终极控制台
 
 策略层级（自动选择）:
   L1 ⚡ uiautomator XML 解析    → 0ms延迟, 100%准确 (标准App)
-  L2 👁️ OCR 视觉识别            → ~500ms延迟, 85-95%准确 (游戏/自定义UI)  
+  L2 👁️ OCR 视觉识别            → ~500ms延迟, 85-95%准确 (游戏/自定义UI)
   L3 🖥️ scrcpy 视频流控制      → ~35ms延迟, 人工辅助
 
 用法:
@@ -14,27 +13,18 @@
   python3 phone_controller.py "发送" --ocr            # 强制用OCR
   python3 phone_controller.py --mirror                # scrcpy 实时投屏
   python3 phone_controller.py --dump                  # 导出 UI 树
+  python3 phone_controller.py "发送" --scroll         # 滚动查找
+  python3 phone_controller.py "发送" --wait 15        # 等待元素出现
 """
 
 import subprocess, sys, os, time, json, xml.etree.ElementTree as ET
+import cv2, numpy as np
+from adb_utils import adb_shell, screenshot, connect, log
 
 # ─── 配置 ─────────────────────────────
 ADB_HOST = os.environ.get("ADB_HOST", "10.150.0.1:40745")
 TESSDATA = "/usr/share/tesseract-ocr/5/tessdata"
 LANG = "chi_sim+eng"
-
-# ─── ADB 工具层 ────────────────────────
-
-def _run(cmd, timeout=15):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-    return r.stdout
-
-def adb(cmd, timeout=15):
-    _run(f"adb connect {ADB_HOST} 2>/dev/null", timeout=5)
-    return _run(f"adb {cmd}", timeout=timeout)
-
-def adb_shell(cmd, timeout=15):
-    return adb(f"shell {cmd}", timeout=timeout)
 
 # ═══════════════════════════════════════
 # L1: UIAUTOMATOR — 0ms / 100%准确
@@ -168,14 +158,7 @@ def _get_ocr():
     return _ocr_api
 
 def shot():
-    """截屏，返回 BGR numpy 数组"""
-    import cv2
-    pid = os.getpid()
-    path = f"/tmp/_pc_{pid}.png"
-    _run(f"adb connect {ADB_HOST} && adb exec-out screencap -p > {path}")
-    img = cv2.imread(path)
-    os.remove(path)
-    return img
+    return screenshot()
 
 def preprocess(img):
     import cv2, numpy as np
@@ -331,6 +314,34 @@ def smart_find(target, force_ocr=False, min_conf=0, prefer_id=True):
     return results, "OCR", elapsed
 
 # ═══════════════════════════════════════
+# 滚动查找 & 等待
+# ═══════════════════════════════════════
+
+def smart_find_scroll(target, force_ocr=False, min_conf=0, max_scrolls=5):
+    for i in range(max_scrolls):
+        results, strategy, latency = smart_find(target, force_ocr, min_conf)
+        if results:
+            return results, strategy, latency, i + 1
+        if i < max_scrolls - 1:
+            print(f"  📜 第 {i+1} 次滚动，还没找到 '{target}'...")
+            adb_shell("input swipe 720 2400 720 800 200")
+            time.sleep(1.5)
+    return [], "scroll", 0, max_scrolls
+
+def wait_for_element(target, timeout=15, interval=1.5):
+    print(f"  ⏳ 等待 '{target}' 出现（超时 {timeout}s）...")
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        results, strategy, latency = smart_find(target)
+        if results:
+            elapsed = int((time.time() - t0) * 1000)
+            print(f"  ✅ 找到 '{target}'（{elapsed}ms, {strategy}）")
+            return results
+        time.sleep(interval)
+    print(f"  ❌ 超时 {timeout}s，'{target}' 未出现")
+    return []
+
+# ═══════════════════════════════════════
 # 显示层
 # ═══════════════════════════════════════
 
@@ -405,6 +416,13 @@ def main():
         else:
             i += 1
 
+    scroll = '--scroll' in args
+    wait_timeout = None
+    if '--wait' in args:
+        idx = args.index('--wait')
+        if idx + 1 < len(args):
+            wait_timeout = int(args[idx + 1])
+
     if not target:
         # 无目标：显示状态
         print("📱 手机控制器 v1.0")
@@ -417,8 +435,14 @@ def main():
         print(f"      phone_controller.py --mirror  # scrcpy投屏")
         return
 
-    # 智能查找
-    results, strategy, latency = smart_find(target, force_ocr, min_conf)
+    # 智能查找（支持 --scroll 和 --wait）
+    if wait_timeout and target:
+        results = wait_for_element(target, wait_timeout)
+    elif scroll and target:
+        results, strategy, latency, scrolls = smart_find_scroll(target, force_ocr, min_conf)
+        print(f"  📜 滚动次数: {scrolls}")
+    else:
+        results, strategy, latency = smart_find(target, force_ocr, min_conf)
 
     if not results:
         print(f"\n  ❌ 所有策略均未找到 '{target}'")
