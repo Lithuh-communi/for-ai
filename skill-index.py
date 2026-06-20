@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """skill-index.py v1.0 — Rikkahub Skill 索引扫描"""
 
-import os, re
+import os
 
 SKILLS_DIR = "/skills"
 
 def parse_frontmatter(text):
     """解析 YAML frontmatter"""
-    # 简单 frontmatter 解析（不需 yaml 库）
-    result = {}
-    in_fm = False
-    for line in text.split('\n'):
+    lines = text.split('\n')
+    if not lines or lines[0].strip() != '---':
+        return {}
+    end = None
+    for i, line in enumerate(lines[1:], 1):
         if line.strip() == '---':
-            in_fm = not in_fm
-            continue
-        if in_fm and ':' in line:
+            end = i
+            break
+    if end is None:
+        return {}
+    result = {}
+    for line in lines[1:end]:
+        if ':' in line:
             k, v = line.split(':', 1)
             result[k.strip()] = v.strip()
     return result
@@ -38,7 +43,7 @@ def scan_skills():
             status = "❌"
             warnings.append("缺少 SKILL.md")
         else:
-            with open(skill_md, 'r') as f:
+            with open(skill_md, 'r', encoding='utf-8') as f:
                 content = f.read()
 
             fm = parse_frontmatter(content)
