@@ -134,3 +134,29 @@ mkdir -p /skills/<skill-name>
 
 *最后更新: 2026-06-21*
 *由 AI 自动创建并维护*
+
+---
+
+## 🎛️ MCP 服务器 (手机控制)
+
+`/skills/mcp-server/server.py` 把手机控制能力暴露为 MCP 工具：
+
+| 工具 | 说明 |
+|------|------|
+| `phone_get_ui` | 获取屏幕 UI 元素树 |
+| `phone_tap_text` | 查找文字并点击 |
+| `phone_tap_xy` | 坐标点击 |
+| `phone_swipe` | 滑动屏幕 |
+| `phone_type` | 输入文字 |
+| `phone_screenshot` | 截图 |
+| `phone_back` / `phone_home` | 导航键 |
+| `phone_monitor` | 手机状态监控 |
+| `phone_notifications` | 通知列表 |
+| `phone_macro_record/play` | 宏录制/回放 |
+| `phone_find_file` | 搜索文件 |
+| `workspace_read/write` | 读写工作区文件 |
+| `workspace_shell` | 执行 Shell 命令 |
+| `list_skills` | 列出所有 Skill |
+
+**启动**: `python3 /skills/mcp-server/server.py`
+**RikkaHub 配置**: 设置 → MCP → STDIO: `python3 /skills/mcp-server/server.py` + `ADB_HOST`
