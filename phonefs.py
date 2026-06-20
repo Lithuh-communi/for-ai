@@ -7,6 +7,7 @@ import json
 import html
 import urllib.parse
 import io
+import time
 from ftplib import FTP, error_perm
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from datetime import datetime
@@ -16,11 +17,18 @@ FTP_PORT = 2121
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template.html')
 
-def get_ftp():
-    ftp = FTP()
-    ftp.connect(FTP_HOST, FTP_PORT, timeout=10)
-    ftp.login('anonymous', '')
-    return ftp
+def get_ftp(max_retries=2):
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            ftp = FTP()
+            ftp.connect(FTP_HOST, FTP_PORT, timeout=10)
+            ftp.login('anonymous', '')
+            return ftp
+        except Exception as e:
+            last_error = e
+            time.sleep(1)
+    raise last_error
 
 def ftp_list(path):
     ftp = get_ftp()
@@ -285,7 +293,38 @@ class PhoneFSHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         print('[PhoneFS] ' + args[0] + ' ' + args[1] + ' ' + args[2])
 
+def find_files(ftp, path, pattern, max_results=50):
+    """递归搜索文件"""
+    results = []
+    try:
+        items = []
+        ftp.cwd(path)
+        ftp.retrlines('LIST', items.append)
+        for line in items:
+            parts = line.split()
+            if len(parts) < 9:
+                continue
+            name = ' '.join(parts[8:])
+            full_path = (path.rstrip('/') + '/' + name).replace('//', '/')
+            is_dir = parts[0].startswith('d')
+            if pattern.lower() in name.lower():
+                results.append(full_path)
+            if is_dir and len(results) < max_results:
+                results.extend(find_files(ftp, full_path, pattern, max_results - len(results)))
+    except:
+        pass
+    return results[:max_results]
+
 if __name__ == '__main__':
+    if '--find' in sys.argv:
+        idx = sys.argv.index('--find')
+        pattern = sys.argv[idx + 1]
+        ftp = get_ftp()
+        results = find_files(ftp, '/', pattern)
+        for r in results:
+            print(r)
+        ftp.quit()
+        sys.exit(0)
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8899
     print('╔══════════════════════════════════╗')
     print('║  📱 手机文件管理器已启动          ║')
