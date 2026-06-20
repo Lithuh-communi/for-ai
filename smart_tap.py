@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-👁️ 智能屏幕控制 — 截屏→OCR→点击，一条龙
-优化版 v2: 预处理增强、模糊匹配、缓存复用、更多手势
+smart_tap.py v2.1 — 智能屏幕控制（adb_utils 版）
 
 用法:
   python3 smart_tap.py                        # 查看屏幕
@@ -11,8 +10,11 @@
   python3 smart_tap.py "发送" --conf 60        # 最低置信度60
   python3 smart_tap.py --list                  # 仅列出文字
   python3 smart_tap.py --swipe 500,2000,500,500  # 滑动
+  python3 smart_tap.py "发送" --scroll         # 滚动查找
+  python3 smart_tap.py --region x,y,w,h        # 区域 OCR
 """
-import subprocess, sys, os, cv2, numpy as np, time, json
+import sys, os, cv2, numpy as np, time, json
+from adb_utils import adb_shell, screenshot, log
 
 # ─── 配置 ─────────────────────────────
 ADB_HOST = os.environ.get("ADB_HOST", "10.150.0.1:40745")
@@ -20,31 +22,11 @@ TESSDATA = "/usr/share/tesseract-ocr/5/tessdata"
 LANG = "chi_sim+eng"
 CACHE_FILE = "/tmp/_screen_cache.json"
 
-# ─── ADB 工具层 ────────────────────────
-
-def _run(cmd, timeout=15):
-    """执行命令，返回 stdout"""
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-    return r.stdout
-
-def adb(cmd, timeout=15):
-    """执行 ADB 命令（自动连接）"""
-    _run(f"adb connect {ADB_HOST} 2>/dev/null", timeout=5)
-    return _run(f"adb {cmd}", timeout=timeout)
-
-def adb_shell(cmd, timeout=15):
-    """ADB shell 命令"""
-    return adb(f"shell {cmd}", timeout=timeout)
-
 # ─── 截图层 ────────────────────────────
 
 def shot():
-    """截屏，返回 BGR numpy 数组（读完自动删临时文件）"""
-    filepath = f"/tmp/_s_{os.getpid()}.png"
-    _run(f"adb connect {ADB_HOST} && adb exec-out screencap -p > {filepath}")
-    img = cv2.imread(filepath)
-    os.remove(filepath)
-    return img
+    """截屏，返回 BGR numpy 数组"""
+    return screenshot()
 
 def preprocess(img):
     """图像预处理：增强对比度 + 自适应二值化，提高 OCR 准确率"""
@@ -100,6 +82,15 @@ def ocr(img, preprocess_img=True):
                 break
     # 不清除 API，下次复用
     return results
+
+
+def ocr_region(img, x, y, w, h):
+    """只识别指定区域的 OCR"""
+    roi = img[y:y+h, x:x+w]
+    if roi.size == 0:
+        return []
+    return ocr(roi)
+
 
 # ─── 查找层 ────────────────────────────
 
@@ -299,6 +290,16 @@ def main():
         else:
             i += 1
 
+    scroll = '--scroll' in args
+
+    region = None
+    if '--region' in args:
+        idx = args.index('--region')
+        if idx + 1 < len(args):
+            parts = args[idx + 1].split(',')
+            if len(parts) == 4:
+                region = tuple(int(p) for p in parts)
+
     # 截屏
     print("📸 截屏...")
     img = shot()
@@ -308,7 +309,12 @@ def main():
 
     # OCR
     print("🔍 OCR 识别...")
-    words = ocr(img)
+    if region:
+        rx, ry, rw, rh = region
+        print(f"  区域: ({rx},{ry},{rw},{rh})")
+        words = ocr_region(img, rx, ry, rw, rh)
+    else:
+        words = ocr(img)
     show_screen(img, words, min_conf)
 
     # 纯滑动
@@ -334,8 +340,27 @@ def main():
     matches = find_text(words, target, min_conf, fuzzy)
 
     if not matches:
-        print(f"  ❌ 没找到 '{target}'")
-        return
+        if scroll:
+            print(f"  📜 OCR 没找到，尝试滚动查找...")
+            from phone_controller import smart_find_scroll
+            results, strategy, latency, scrolls = smart_find_scroll(target, fuzzy, min_conf)
+            if results:
+                print(f"  ✅ 滚动找到 {len(results)} 个匹配 ({scrolls} 次滚动)")
+                # 将 phone_controller 结果转换为 smart_tap 格式
+                matches = []
+                for el in results:
+                    text = el.get('text', '')
+                    cx, cy = el['center']
+                    x1, y1, x2, y2 = el['bounds']
+                    conf = el.get('confidence', el.get('score', 0))
+                    matches.append((text, cx, cy, x1, y1, x2, y2, conf))
+                matches.sort(key=lambda m: m[7], reverse=True)
+            else:
+                print(f"  ❌ 滚动也没找到 '{target}'（{scrolls} 次）")
+                return
+        else:
+            print(f"  ❌ 没找到 '{target}'")
+            return
 
     if len(matches) > 1:
         print(f"  📍 找到 {len(matches)} 个匹配:")
