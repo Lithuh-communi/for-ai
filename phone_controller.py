@@ -161,7 +161,6 @@ def shot():
     return screenshot()
 
 def preprocess(img):
-    import cv2, numpy as np
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     enhanced = clahe.apply(gray)
@@ -172,7 +171,6 @@ def preprocess(img):
 def ocr(img, preprocess_img=True):
     import tesserocr
     from PIL import Image
-    import cv2
 
     api = _get_ocr()
     if preprocess_img:
@@ -266,7 +264,7 @@ def key(keycode):
 def type_text(text):
     if any('\u4e00' <= c <= '\u9fff' for c in text):
         escaped = text.replace("'", "\\'")
-        adb_shell(f"service call clipboard 4 i32 1 s16 '{escaped}' s16 'label'", timeout=5)
+        adb_shell(f"service call clipboard 4 i32 1 s16 '{escaped}' s16 'label'")
         print(f"  ✅ 已写入剪贴板 (中文): {text}")
     else:
         adb_shell(f"input text '{text}'")
@@ -421,7 +419,11 @@ def main():
     if '--wait' in args:
         idx = args.index('--wait')
         if idx + 1 < len(args):
-            wait_timeout = int(args[idx + 1])
+            try:
+                wait_timeout = int(args[idx + 1])
+            except ValueError:
+                wait_timeout = 15
+                print(f"  ⚠️ --wait 值无效，使用默认 15s")
 
     if not target:
         # 无目标：显示状态
