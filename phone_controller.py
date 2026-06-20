@@ -15,6 +15,9 @@
   python3 phone_controller.py --dump                  # 导出 UI 树
   python3 phone_controller.py "发送" --scroll         # 滚动查找
   python3 phone_controller.py "发送" --wait 15        # 等待元素出现
+  python3 phone_controller.py --save-template <name>  # 保存屏幕区域为模板
+  python3 phone_controller.py --match-template <name> # 模板匹配查找
+  python3 phone_controller.py --match-template <name> --threshold 0.8  # 模板匹配（自定义阈值）
 """
 
 import subprocess, sys, os, time, json, xml.etree.ElementTree as ET
@@ -362,6 +365,126 @@ def show_ui_tree(elements, max_items=30):
                 print(f"  ... 还有 {len(elements) - shown} 个元素未显示")
                 break
 
+
+# ═══════════════════════════════════════
+# L4: 模板匹配
+# ═══════════════════════════════════════
+
+TEMPLATES_DIR = "/workspace/templates"
+
+def ensure_templates_dir():
+    os.makedirs(TEMPLATES_DIR, exist_ok=True)
+
+def save_template(name, x1, y1, x2, y2):
+    """保存屏幕上指定区域为模板"""
+    ensure_templates_dir()
+    img = screenshot()
+    if img is None:
+        return False
+    roi = img[y1:y2, x1:x2]
+    path = os.path.join(TEMPLATES_DIR, name + '.png')
+    cv2.imwrite(path, roi)
+    # 保存位置信息
+    info = {"name": name, "x1": x1, "y1": y1, "x2": x2, "y2": y2, "w": x2-x1, "h": y2-y1}
+    with open(os.path.join(TEMPLATES_DIR, name + '.json'), 'w') as f:
+        json.dump(info, f)
+    print(f"✅ 模板 '{name}' 已保存 ({x2-x1}x{y2-y1}px)")
+    return True
+
+def match_template(name, threshold=0.7):
+    """在屏幕上查找模板，返回匹配位置列表"""
+    template_path = os.path.join(TEMPLATES_DIR, name + '.png')
+    if not os.path.exists(template_path):
+        print(f"❌ 模板 '{name}' 不存在")
+        return []
+
+    template = cv2.imread(template_path)
+    if template is None:
+        return []
+    th, tw = template.shape[:2]
+
+    img = screenshot()
+    if img is None:
+        return []
+
+    result = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
+    locations = np.where(result >= threshold)
+
+    matches = []
+    for pt in zip(*locations[::-1]):
+        cx = pt[0] + tw // 2
+        cy = pt[1] + th // 2
+        conf = float(result[pt[1], pt[0]])
+        matches.append({
+            'text': name,
+            'center': (cx, cy),
+            'bounds': (pt[0], pt[1], pt[0] + tw, pt[1] + th),
+            'confidence': conf,
+            'match_type': 'template',
+            'clickable': True,
+        })
+
+    # 去重（合并重叠匹配）
+    return dedup_matches(matches)
+
+def dedup_matches(matches, iou_threshold=0.3):
+    """NMS 去重"""
+    if not matches:
+        return []
+    matches = sorted(matches, key=lambda m: m['confidence'], reverse=True)
+    kept = []
+    for m in matches:
+        x1, y1, x2, y2 = m['bounds']
+        overlap = False
+        for k in kept:
+            kx1, ky1, kx2, ky2 = k['bounds']
+            ix1 = max(x1, kx1); iy1 = max(y1, ky1)
+            ix2 = min(x2, kx2); iy2 = min(y2, ky2)
+            if ix2 > ix1 and iy2 > iy1:
+                inter = (ix2 - ix1) * (iy2 - iy1)
+                union = (x2-x1)*(y2-y1) + (kx2-kx1)*(ky2-ky1) - inter
+                if inter / union > iou_threshold:
+                    overlap = True
+                    break
+        if not overlap:
+            kept.append(m)
+    return kept
+
+def smart_find_all(target, force_ocr=False, min_conf=0, threshold=0.7):
+    """L1 + L2 + L4 全策略查找"""
+    t0 = time.time()
+    all_results = []
+
+    # L1: UI 树
+    try:
+        elements = parse_ui()
+        ui_results = find_ui_elements(target, elements)
+        all_results.extend(ui_results)
+    except Exception as e:
+        log("WARN", "phone_controller", f"L1 failed: {e}")
+
+    # L2: OCR
+    if not all_results or force_ocr:
+        try:
+            img = shot()
+            words = ocr(img)
+            ocr_results = find_ocr_elements(target, words, min_conf)
+            all_results.extend(ocr_results)
+        except Exception as e:
+            log("WARN", "phone_controller", f"L2 failed: {e}")
+
+    # L4: 模板匹配
+    if not all_results:
+        try:
+            tm_results = match_template(target, threshold)
+            all_results.extend(tm_results)
+        except Exception as e:
+            log("WARN", "phone_controller", f"L4 failed: {e}")
+
+    all_results.sort(key=lambda x: x.get('score', x.get('confidence', 0)), reverse=True)
+    elapsed = int((time.time() - t0) * 1000)
+    return all_results, "ALL", elapsed
+
 # ═══════════════════════════════════════
 # 主入口
 # ═══════════════════════════════════════
@@ -382,6 +505,42 @@ def main():
     if '--ui' in args:
         elements = parse_ui()
         show_ui_tree(elements)
+        return
+
+    if '--save-template' in args:
+        idx = args.index('--save-template')
+        name = args[idx + 1]
+        # 用当前截图选择区域... 简单实现：先截图显示，用户输入坐标
+        print("📸 截图中，请稍后...")
+        img = shot()
+        h, w = img.shape[:2]
+        print(f"屏幕: {w}x{h}")
+        print("输入区域坐标: x1 y1 x2 y2")
+        # 简单交互
+        coords = input("> ").strip().split()
+        if len(coords) == 4:
+            save_template(name, int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3]))
+        return
+
+    if '--match-template' in args:
+        idx = args.index('--match-template')
+        name = args[idx + 1]
+        threshold = 0.7
+        if '--threshold' in args:
+            ti = args.index('--threshold')
+            threshold = float(args[ti + 1])
+        results = match_template(name, threshold)
+        if results:
+            print(f"✅ 找到 {len(results)} 个匹配:")
+            for i, r in enumerate(results[:5], 1):
+                cx, cy = r['center']
+                conf = r['confidence']
+                print(f"  [{i}] ({cx},{cy}) 置信度={conf:.0%}")
+            # 点击第一个
+            cx, cy = results[0]['center']
+            adb_shell(f"input tap {cx} {cy}")
+        else:
+            print(f"❌ 未找到模板 '{name}'")
         return
 
     # 解析参数
@@ -435,6 +594,8 @@ def main():
         print(f"      phone_controller.py --ui      # 查看UI树")
         print(f"      phone_controller.py --dump    # 导出UI树XML")
         print(f"      phone_controller.py --mirror  # scrcpy投屏")
+        print(f"      phone_controller.py --save-template <name>  # 保存模板")
+        print(f"      phone_controller.py --match-template <name> [--threshold 0.8]  # 匹配模板")
         return
 
     # 智能查找（支持 --scroll 和 --wait）
