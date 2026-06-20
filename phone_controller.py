@@ -5,6 +5,7 @@
   L1 ⚡ uiautomator XML 解析    → 0ms延迟, 100%准确 (标准App)
   L2 👁️ OCR 视觉识别            → ~500ms延迟, 85-95%准确 (游戏/自定义UI)
   L3 🖥️ scrcpy 视频流控制      → ~35ms延迟, 人工辅助
+  L4 🖼️ 模板匹配                → ~200ms延迟, 图标/图片查找
 
 用法:
   python3 phone_controller.py                        # 查看屏幕 + UI树
@@ -15,6 +16,7 @@
   python3 phone_controller.py --dump                  # 导出 UI 树
   python3 phone_controller.py "发送" --scroll         # 滚动查找
   python3 phone_controller.py "发送" --wait 15        # 等待元素出现
+  python3 phone_controller.py "发送" --all            # L1+L2+L4 全策略查找
   python3 phone_controller.py --save-template <name>  # 保存屏幕区域为模板
   python3 phone_controller.py --match-template <name> # 模板匹配查找
   python3 phone_controller.py --match-template <name> --threshold 0.8  # 模板匹配（自定义阈值）
@@ -520,6 +522,8 @@ def main():
         coords = input("> ").strip().split()
         if len(coords) == 4:
             save_template(name, int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3]))
+        else:
+            print("   ❌ 坐标格式无效，请输入: x1 y1 x2 y2")
         return
 
     if '--match-template' in args:
@@ -574,6 +578,7 @@ def main():
             i += 1
 
     scroll = '--scroll' in args
+    use_all = '--all' in args
     wait_timeout = None
     if '--wait' in args:
         idx = args.index('--wait')
@@ -598,9 +603,12 @@ def main():
         print(f"      phone_controller.py --match-template <name> [--threshold 0.8]  # 匹配模板")
         return
 
-    # 智能查找（支持 --scroll 和 --wait）
+    # 智能查找（支持 --scroll, --wait, --all）
     if wait_timeout and target:
         results = wait_for_element(target, wait_timeout)
+    elif use_all and target:
+        print("  🔄 全策略查找 (L1+L2+L4)...")
+        results, strategy, latency = smart_find_all(target, force_ocr, min_conf)
     elif scroll and target:
         results, strategy, latency, scrolls = smart_find_scroll(target, force_ocr, min_conf)
         print(f"  📜 滚动次数: {scrolls}")
