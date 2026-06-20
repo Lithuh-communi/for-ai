@@ -27,6 +27,10 @@ def get_ftp(max_retries=2):
             return ftp
         except Exception as e:
             last_error = e
+            try:
+                ftp.close()
+            except:
+                pass
             time.sleep(1)
     raise last_error
 
@@ -311,7 +315,7 @@ def find_files(ftp, path, pattern, max_results=50):
                 results.append(full_path)
             if is_dir and len(results) < max_results:
                 results.extend(find_files(ftp, full_path, pattern, max_results - len(results)))
-    except:
+    except Exception:
         pass
     return results[:max_results]
 
