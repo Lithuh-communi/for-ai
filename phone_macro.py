@@ -240,7 +240,10 @@ def main():
             print("请指定宏名称")
     elif '--edit' in args:
         idx = args.index('--edit')
-        name = args[idx + 1]
+        name = args[idx + 1] if idx + 1 < len(args) else ""
+        if not name:
+            print("请指定宏名称")
+            return
         path = os.path.join(MACROS_DIR, name + '.json')
         if os.path.exists(path):
             print(f"📝 编辑宏文件: {path}")
